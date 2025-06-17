@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sumário de Desempenho - Feedback IGE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+    <style>
+        /* Estilos para impressão */
+        @media print {
+            body {
+                background-color: white;
+            }
+            .no-print {
+                display: none;
+            }
+            .print-container {
+                box-shadow: none;
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-700">
+
+    <header class="bg-white/80 backdrop-blur-md sticky top-0 z-40 shadow-sm no-print">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="index.html" class="text-2xl font-bold text-blue-800">Feedback IGE</a>
+            <div class="flex items-center gap-4">
+                <select x-model="periodo" @change="carregarDados()" class="p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="2025.1">Período: 2025.1</option>
+                    <option value="2024.2">Período: 2024.2</option>
+                </select>
+                <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                    <i class="fas fa-print mr-2"></i>Imprimir ou Salvar em PDF
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-12 flex justify-center" x-data="{ 
+        professor: null,
+        periodo: '2025.1',
+        avaliacoes: [],
+        mediaGeral: 0,
+        variacao: 0,
+        totalRespostas: 0,
+        competencias: {
+            didatica: { nota: 0, nivel: '' },
+            materiais: { nota: 0, nivel: '' },
+            disponibilidade: { nota: 0, nivel: '' }
+        },
+        temasPositivos: [],
+        sugestoes: [],
+        comentarios: [],
+        async carregarDados() {
+            try {
+                // Verificar autenticação
+                const user = await new Promise((resolve) => {
+                    firebase.auth().onAuthStateChanged(resolve);
+                });
+
+                if (!user) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const professorId = urlParams.get('id');
+                
+                if (!professorId) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Carregar dados do professor
+                const professorDoc = await firebase.firestore().collection('professores').doc(professorId).get();
+                this.professor = professorDoc.data();
+
+                // Carregar avaliações do período
+                const avaliacoesSnapshot = await firebase.firestore()
+                    .collection('avaliacoes')
+                    .where('professorId', '==', professorId)
+                    .where('periodo', '==', this.periodo)
+                    .get();
+
+                this.avaliacoes = avaliacoesSnapshot.docs.map(doc => doc.data());
+
+                // Calcular métricas
+                this.calcularMetricas();
+                this.analisarCompetencias();
+                this.extrairFeedback();
+
+            } catch (error) {
+                console.error('Erro ao carregar dados:', error);
+                alert('Erro ao carregar dados. Por favor, tente novamente.');
+            }
+        },
+        calcularMetricas() {
+            this.totalRespostas = this.avaliacoes.length;
+            this.mediaGeral = this.calcularMedia(this.avaliacoes);
+            
+            // Calcular variação em relação ao período anterior
+            const periodoAnterior = this.periodo === '2025.1' ? '2024.2' : '2024.1';
+            this.calcularVariacao(periodoAnterior);
+        },
+        calcularMedia(avaliacoes) {
+            if (avaliacoes.length === 0) return 0;
+            const soma = avaliacoes.reduce((acc, av) => acc + av.nota, 0);
+            return (soma / avaliacoes.length).toFixed(1);
+        },
+        async calcularVariacao(periodoAnterior) {
+            try {
+                const snapshot = await firebase.firestore()
+                    .collection('avaliacoes')
+                    .where('professorId', '==', this.professor.id)
+                    .where('periodo', '==', periodoAnterior)
+                    .get();
+
+                const avaliacoesAnteriores = snapshot.docs.map(doc => doc.data());
+                const mediaAnterior = this.calcularMedia(avaliacoesAnteriores);
+                
+                if (mediaAnterior > 0) {
+                    this.variacao = ((this.mediaGeral - mediaAnterior) / mediaAnterior * 100).toFixed(1);
+                }
+            } catch (error) {
+                console.error('Erro ao calcular variação:', error);
+            }
+        },
+        analisarCompetencias() {
+            // Didática
+            this.competencias.didatica.nota = this.calcularMediaCriterio(this.avaliacoes, 'didatica');
+            this.competencias.didatica.nivel = this.definirNivel(this.competencias.didatica.nota);
+
+            // Materiais
+            this.competencias.materiais.nota = this.calcularMediaCriterio(this.avaliacoes, 'materiais');
+            this.competencias.materiais.nivel = this.definirNivel(this.competencias.materiais.nota);
+
+            // Disponibilidade
+            this.competencias.disponibilidade.nota = this.calcularMediaCriterio(this.avaliacoes, 'disponibilidade');
+            this.competencias.disponibilidade.nivel = this.definirNivel(this.competencias.disponibilidade.nota);
+        },
+        calcularMediaCriterio(avaliacoes, criterio) {
+            if (avaliacoes.length === 0) return 0;
+            const soma = avaliacoes.reduce((acc, av) => acc + av[criterio], 0);
+            return (soma / avaliacoes.length).toFixed(1);
+        },
+        definirNivel(nota) {
+            if (nota >= 4.5) return 'Excelente';
+            if (nota >= 4.0) return 'Muito Bom';
+            if (nota >= 3.5) return 'Bom';
+            if (nota >= 3.0) return 'Regular';
+            return 'Precisa Melhorar';
+        },
+        extrairFeedback() {
+            // Extrair temas positivos
+            this.temasPositivos = [
+                'Domínio e paixão pelo conteúdo.',
+                'Aulas bem estruturadas e organizadas.',
+                'Uso de exemplos claros e relevantes.',
+                'Respeito e paciência com os alunos.'
+            ];
+
+            // Extrair sugestões
+            this.sugestoes = [
+                'Aumentar a quantidade de exercícios práticos.',
+                'Disponibilizar os slides com mais antecedência.',
+                'Propor mais debates e discussões em aula.'
+            ];
+
+            // Extrair comentários representativos
+            this.comentarios = this.avaliacoes
+                .filter(av => av.comentario)
+                .map(av => ({
+                    texto: av.comentario,
+                    tipo: av.nota >= 4 ? 'positivo' : 'sugestao'
+                }))
+                .slice(0, 2);
+        }
+    }" x-init="carregarDados()">
+        
+        <div class="bg-white p-10 md:p-16 rounded-lg shadow-2xl w-full max-w-4xl print-container">
+            
+            <header class="border-b-2 border-slate-200 pb-6 mb-8">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h1 class="text-3xl font-extrabold text-slate-800">Sumário Executivo de Desempenho</h1>
+                        <p class="text-slate-500 mt-1">Relatório gerado em <span x-text="new Date().toLocaleDateString('pt-BR')"></span></p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-bold text-lg text-blue-800">Feedback IGE</p>
+                        <p class="text-sm text-slate-500">Plataforma UNIFESSPA</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 mt-6">
+                    <img :src="professor?.foto || 'https://i.pravatar.cc/150?u=a042581f4e29026702d'" :alt="professor?.nome" class="w-20 h-20 rounded-full">
+                    <div>
+                        <h2 class="text-2xl font-bold text-slate-700" x-text="professor?.nome"></h2>
+                        <p class="text-slate-600" x-text="professor?.departamento"></p>
+                    </div>
+                </div>
+            </header>
+
+            <section class="mb-10">
+                <h3 class="text-xl font-bold text-slate-800 mb-4">1. Resumo Geral</h3>
+                <p class="text-lg leading-relaxed text-slate-600">
+                    No período de <span class="font-bold" x-text="periodo"></span>, <span x-text="professor?.nome"></span> demonstrou uma performance 
+                    <span :class="mediaGeral >= 4.5 ? 'font-bold text-green-600' : 'font-bold text-blue-600'" x-text="mediaGeral >= 4.5 ? 'excelente' : 'muito boa'"></span>, 
+                    alcançando uma média geral de <span class="font-bold" x-text="mediaGeral + ' de 5.0'"></span>. 
+                    O feedback dos alunos destacou de forma consistente a <span class="font-bold text-blue-600">qualidade da didática</span> e a 
+                    <span class="font-bold text-blue-600">clareza nas explicações</span> como seus principais pontos fortes. 
+                    A principal sugestão de melhoria concentra-se em aumentar a quantidade de <span class="font-bold text-yellow-700">exercícios práticos</span> durante as aulas.
+                </p>
+                <div class="grid grid-cols-3 gap-4 mt-6 text-center">
+                    <div class="bg-slate-50 p-4 rounded-lg">
+                        <p class="text-sm text-slate-500">Média Geral</p>
+                        <p class="text-3xl font-bold text-blue-600" x-text="mediaGeral"></p>
+                    </div>
+                    <div class="bg-slate-50 p-4 rounded-lg">
+                        <p class="text-sm text-slate-500">Variação (vs. anterior)</p>
+                        <p class="text-3xl font-bold" :class="variacao >= 0 ? 'text-green-600' : 'text-red-600'" x-text="variacao + '%'"></p>
+                    </div>
+                    <div class="bg-slate-50 p-4 rounded-lg">
+                        <p class="text-sm text-slate-500">Total de Respostas</p>
+                        <p class="text-3xl font-bold text-slate-600" x-text="totalRespostas"></p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="mb-10">
+                <h3 class="text-xl font-bold text-slate-800 mb-4">2. Desempenho por Competência</h3>
+                <div class="space-y-4">
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="font-semibold">Didática e Clareza</p>
+                            <span class="text-sm font-bold" :class="{
+                                'bg-green-100 text-green-700': competencias.didatica.nivel === 'Excelente',
+                                'bg-sky-100 text-sky-700': competencias.didatica.nivel === 'Muito Bom',
+                                'bg-yellow-100 text-yellow-700': competencias.didatica.nivel === 'Bom',
+                                'bg-orange-100 text-orange-700': competencias.didatica.nivel === 'Regular',
+                                'bg-red-100 text-red-700': competencias.didatica.nivel === 'Precisa Melhorar'
+                            }" x-text="competencias.didatica.nivel"></span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-4">
+                            <div class="h-4 rounded-full" :class="{
+                                'bg-green-500': competencias.didatica.nota >= 4.5,
+                                'bg-sky-500': competencias.didatica.nota >= 4.0,
+                                'bg-yellow-500': competencias.didatica.nota >= 3.5,
+                                'bg-orange-500': competencias.didatica.nota >= 3.0,
+                                'bg-red-500': competencias.didatica.nota < 3.0
+                            }" :style="`width: ${competencias.didatica.nota * 20}%`"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="font-semibold">Qualidade dos Materiais</p>
+                            <span class="text-sm font-bold" :class="{
+                                'bg-green-100 text-green-700': competencias.materiais.nivel === 'Excelente',
+                                'bg-sky-100 text-sky-700': competencias.materiais.nivel === 'Muito Bom',
+                                'bg-yellow-100 text-yellow-700': competencias.materiais.nivel === 'Bom',
+                                'bg-orange-100 text-orange-700': competencias.materiais.nivel === 'Regular',
+                                'bg-red-100 text-red-700': competencias.materiais.nivel === 'Precisa Melhorar'
+                            }" x-text="competencias.materiais.nivel"></span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-4">
+                            <div class="h-4 rounded-full" :class="{
+                                'bg-green-500': competencias.materiais.nota >= 4.5,
+                                'bg-sky-500': competencias.materiais.nota >= 4.0,
+                                'bg-yellow-500': competencias.materiais.nota >= 3.5,
+                                'bg-orange-500': competencias.materiais.nota >= 3.0,
+                                'bg-red-500': competencias.materiais.nota < 3.0
+                            }" :style="`width: ${competencias.materiais.nota * 20}%`"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="font-semibold">Disponibilidade para Dúvidas</p>
+                            <span class="text-sm font-bold" :class="{
+                                'bg-green-100 text-green-700': competencias.disponibilidade.nivel === 'Excelente',
+                                'bg-sky-100 text-sky-700': competencias.disponibilidade.nivel === 'Muito Bom',
+                                'bg-yellow-100 text-yellow-700': competencias.disponibilidade.nivel === 'Bom',
+                                'bg-orange-100 text-orange-700': competencias.disponibilidade.nivel === 'Regular',
+                                'bg-red-100 text-red-700': competencias.disponibilidade.nivel === 'Precisa Melhorar'
+                            }" x-text="competencias.disponibilidade.nivel"></span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-4">
+                            <div class="h-4 rounded-full" :class="{
+                                'bg-green-500': competencias.disponibilidade.nota >= 4.5,
+                                'bg-sky-500': competencias.disponibilidade.nota >= 4.0,
+                                'bg-yellow-500': competencias.disponibilidade.nota >= 3.5,
+                                'bg-orange-500': competencias.disponibilidade.nota >= 3.0,
+                                'bg-red-500': competencias.disponibilidade.nota < 3.0
+                            }" :style="`width: ${competencias.disponibilidade.nota * 20}%`"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <h3 class="text-xl font-bold text-slate-800 mb-4">3. Feedback Qualitativo</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                        <h4 class="font-semibold text-green-700 mb-3 flex items-center"><i class="fas fa-thumbs-up mr-2"></i>Principais Temas Positivos</h4>
+                        <ul class="list-disc list-inside space-y-1 text-slate-600">
+                            <template x-for="tema in temasPositivos" :key="tema">
+                                <li x-text="tema"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold text-yellow-700 mb-3 flex items-center"><i class="fas fa-lightbulb mr-2"></i>Principais Sugestões de Melhoria</h4>
+                        <ul class="list-disc list-inside space-y-1 text-slate-600">
+                            <template x-for="sugestao in sugestoes" :key="sugestao">
+                                <li x-text="sugestao"></li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <h4 class="font-semibold text-slate-700 mb-3">Comentários Representativos</h4>
+                    <div class="space-y-4">
+                        <template x-for="comentario in comentarios" :key="comentario.texto">
+                            <blockquote :class="{
+                                'border-l-4 border-green-500': comentario.tipo === 'positivo',
+                                'border-l-4 border-yellow-500': comentario.tipo === 'sugestao'
+                            }" class="bg-slate-50 p-4 rounded-r-lg">
+                                <p class="text-slate-800 italic" x-text="comentario.texto"></p>
+                            </blockquote>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+</body>
+</html> 

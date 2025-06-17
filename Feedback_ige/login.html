@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Feedback IGE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="firebase-config.js"></script>
+</head>
+<body class="font-sans">
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 min-h-screen">
+        
+        <div class="hidden lg:flex flex-col justify-between p-12 bg-blue-800 text-white relative overflow-hidden">
+            <a href="#" class="text-3xl font-bold z-10">Feedback IGE</a>
+            
+            <div class="z-10">
+                <h1 class="text-5xl font-extrabold leading-tight mb-4">Sua Voz Transforma a Educação.</h1>
+                <p class="text-xl text-blue-200 max-w-lg">
+                    Acesse a plataforma para compartilhar suas percepções e colaborar com o aprimoramento contínuo da UNIFESSPA.
+                </p>
+            </div>
+            
+            <p class="text-blue-300 text-sm z-10">&copy; 2025 Feedback IGE - Todos os direitos reservados.</p>
+
+            <div class="absolute -bottom-1/4 -right-1/4 w-96 h-96 bg-blue-700/50 rounded-full"></div>
+            <div class="absolute -top-16 -left-24 w-80 h-80 border-4 border-blue-600/50 rounded-full"></div>
+        </div>
+
+        <div class="bg-slate-50 flex items-center justify-center p-6 sm:p-12">
+            <div class="w-full max-w-md" x-data="{ 
+                email: '',
+                senha: '',
+                error: '',
+                loading: false,
+                async login() {
+                    try {
+                        this.loading = true;
+                        this.error = '';
+
+                        if (!this.email.endsWith('@unifesspa.edu.br')) {
+                            this.error = 'Use seu email institucional (@unifesspa.edu.br).';
+                            return;
+                        }
+
+                        const userCredential = await firebase.auth().signInWithEmailAndPassword(this.email, this.senha);
+                        window.location.href = 'index.html';
+                    } catch (error) {
+                        console.error('Erro no login:', error);
+                        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                            this.error = 'Email ou senha incorretos.';
+                        } else {
+                            this.error = 'Erro ao fazer login. Tente novamente.';
+                        }
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                async loginWithGoogle() {
+                    try {
+                        this.loading = true;
+                        this.error = '';
+                        const provider = new firebase.auth.GoogleAuthProvider();
+                        const userCredential = await firebase.auth().signInWithPopup(provider);
+                        window.location.href = 'index.html';
+                    } catch (error) {
+                        console.error('Erro no login com Google:', error);
+                        this.error = 'Erro ao fazer login com Google. Tente novamente.';
+                    } finally {
+                        this.loading = false;
+                    }
+                }
+            }">
+                <div class="lg:hidden text-center mb-8">
+                    <a href="#" class="text-3xl font-bold text-blue-800">Feedback IGE</a>
+                </div>
+
+                <h2 class="text-3xl font-bold text-slate-800">Acesse sua conta</h2>
+                <p class="text-slate-600 mt-2 mb-8">Bem-vindo(a) de volta! Por favor, insira seus dados.</p>
+
+                <div x-show="error" class="mb-4 p-4 bg-red-100 text-red-700 rounded-lg">
+                    <p x-text="error"></p>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-4 mb-6">
+                    <button @click="loginWithGoogle()" class="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 transition-colors" :disabled="loading">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google logo" class="w-6 h-6">
+                        <span class="font-semibold text-slate-700">Entrar com Google</span>
+                    </button>
+                </div>
+
+                <div class="flex items-center my-6">
+                    <div class="flex-grow border-t border-slate-300"></div>
+                    <span class="mx-4 text-slate-500 font-semibold">OU</span>
+                    <div class="flex-grow border-t border-slate-300"></div>
+                </div>
+
+                <form @submit.prevent="login()" class="space-y-5">
+                    <div>
+                        <label for="email" class="block text-slate-700 font-bold mb-2">Email Institucional</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                                <i class="fas fa-envelope text-slate-400"></i>
+                            </span>
+                            <input type="email" id="email" x-model="email" class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="seu.email@unifesspa.edu.br" required>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="password" class="block text-slate-700 font-bold mb-2">Senha</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                                <i class="fas fa-lock text-slate-400"></i>
+                            </span>
+                            <input type="password" id="password" x-model="senha" class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Digite sua senha" required>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <input type="checkbox" id="remember" name="remember" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="remember" class="ml-2 block text-sm text-slate-800">Lembrar-me</label>
+                        </div>
+                        <a href="#" class="text-sm font-medium text-blue-600 hover:text-blue-800">Esqueceu a senha?</a>
+                    </div>
+
+                    <div>
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-all shadow-md transform hover:scale-105" :disabled="loading">
+                            <i class="fas fa-sign-in-alt mr-2"></i>
+                            <span x-show="!loading">Entrar</span>
+                            <span x-show="loading">Entrando...</span>
+                        </button>
+                    </div>
+                </form>
+
+                <p class="text-center text-slate-600 mt-8">
+                    Não tem uma conta? <a href="cadastro.html" class="font-bold text-blue-600 hover:text-blue-800">Cadastre-se</a>.
+                </p>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Verificar se o usuário já está logado
+        firebase.auth().onAuthStateChanged((user) => {
+            if (user) {
+                window.location.href = 'index.html';
+            }
+        });
+    </script>
+
+</body>
+</html> 

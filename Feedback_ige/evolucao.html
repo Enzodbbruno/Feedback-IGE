@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análise de Evolução - Feedback IGE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="auth.js"></script>
+</head>
+<body class="bg-slate-100 font-sans text-slate-700">
+
+    <header class="bg-white/80 backdrop-blur-md sticky top-0 z-40 shadow-sm">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="index.html" class="text-2xl font-bold text-blue-800">Feedback IGE</a>
+            <nav class="hidden md:flex items-center space-x-6">
+                <a href="index.html" class="hover:text-blue-600 transition-colors">Dashboard</a>
+                <a href="relatorio.html" class="font-bold text-blue-600 border-b-2 border-blue-600">Relatórios</a>
+                <a href="perfil.html" class="hover:text-blue-600 transition-colors">Meu Perfil</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-12" x-data="{ 
+        professor: null,
+        periodoAtual: '2025.1',
+        periodoAnterior: '2024.2',
+        avaliacoesAtual: [],
+        avaliacoesAnterior: [],
+        mediaAtual: 0,
+        mediaAnterior: 0,
+        variacao: 0,
+        criterios: {
+            didatica: { atual: 0, anterior: 0 },
+            materiais: { atual: 0, anterior: 0 },
+            disponibilidade: { atual: 0, anterior: 0 }
+        },
+        sentimentos: {
+            anterior: { positivos: 0, negativos: 0 },
+            atual: { positivos: 0, negativos: 0 }
+        },
+        termosPositivos: [],
+        async carregarDados() {
+            try {
+                // Verificar autenticação
+                const user = await new Promise((resolve) => {
+                    firebase.auth().onAuthStateChanged(resolve);
+                });
+
+                if (!user) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const professorId = urlParams.get('id');
+                
+                if (!professorId) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Carregar dados do professor
+                const professorDoc = await firebase.firestore().collection('professores').doc(professorId).get();
+                this.professor = professorDoc.data();
+
+                // Carregar avaliações dos períodos
+                const [atualSnapshot, anteriorSnapshot] = await Promise.all([
+                    firebase.firestore()
+                        .collection('avaliacoes')
+                        .where('professorId', '==', professorId)
+                        .where('periodo', '==', this.periodoAtual)
+                        .get(),
+                    firebase.firestore()
+                        .collection('avaliacoes')
+                        .where('professorId', '==', professorId)
+                        .where('periodo', '==', this.periodoAnterior)
+                        .get()
+                ]);
+
+                this.avaliacoesAtual = atualSnapshot.docs.map(doc => doc.data());
+                this.avaliacoesAnterior = anteriorSnapshot.docs.map(doc => doc.data());
+
+                // Calcular métricas
+                this.calcularMetricas();
+                this.analisarSentimentos();
+                this.extrairTermosPositivos();
+
+            } catch (error) {
+                console.error('Erro ao carregar dados:', error);
+                alert('Erro ao carregar dados. Por favor, tente novamente.');
+            }
+        },
+        calcularMetricas() {
+            // Médias gerais
+            this.mediaAtual = this.calcularMedia(this.avaliacoesAtual);
+            this.mediaAnterior = this.calcularMedia(this.avaliacoesAnterior);
+            this.variacao = ((this.mediaAtual - this.mediaAnterior) / this.mediaAnterior * 100).toFixed(1);
+
+            // Médias por critério
+            this.criterios.didatica.atual = this.calcularMediaCriterio(this.avaliacoesAtual, 'didatica');
+            this.criterios.didatica.anterior = this.calcularMediaCriterio(this.avaliacoesAnterior, 'didatica');
+            
+            this.criterios.materiais.atual = this.calcularMediaCriterio(this.avaliacoesAtual, 'materiais');
+            this.criterios.materiais.anterior = this.calcularMediaCriterio(this.avaliacoesAnterior, 'materiais');
+            
+            this.criterios.disponibilidade.atual = this.calcularMediaCriterio(this.avaliacoesAtual, 'disponibilidade');
+            this.criterios.disponibilidade.anterior = this.calcularMediaCriterio(this.avaliacoesAnterior, 'disponibilidade');
+        },
+        calcularMedia(avaliacoes) {
+            if (avaliacoes.length === 0) return 0;
+            const soma = avaliacoes.reduce((acc, av) => acc + av.nota, 0);
+            return (soma / avaliacoes.length).toFixed(1);
+        },
+        calcularMediaCriterio(avaliacoes, criterio) {
+            if (avaliacoes.length === 0) return 0;
+            const soma = avaliacoes.reduce((acc, av) => acc + av[criterio], 0);
+            return (soma / avaliacoes.length).toFixed(1);
+        },
+        analisarSentimentos() {
+            // Análise do período atual
+            const positivosAtual = this.avaliacoesAtual.filter(av => av.nota >= 4).length;
+            const negativosAtual = this.avaliacoesAtual.filter(av => av.nota < 4).length;
+            const totalAtual = this.avaliacoesAtual.length;
+
+            this.sentimentos.atual = {
+                positivos: totalAtual ? (positivosAtual / totalAtual * 100).toFixed(0) : 0,
+                negativos: totalAtual ? (negativosAtual / totalAtual * 100).toFixed(0) : 0
+            };
+
+            // Análise do período anterior
+            const positivosAnterior = this.avaliacoesAnterior.filter(av => av.nota >= 4).length;
+            const negativosAnterior = this.avaliacoesAnterior.filter(av => av.nota < 4).length;
+            const totalAnterior = this.avaliacoesAnterior.length;
+
+            this.sentimentos.anterior = {
+                positivos: totalAnterior ? (positivosAnterior / totalAnterior * 100).toFixed(0) : 0,
+                negativos: totalAnterior ? (negativosAnterior / totalAnterior * 100).toFixed(0) : 0
+            };
+        },
+        extrairTermosPositivos() {
+            // Implementar análise de texto para extrair termos mais citados
+            this.termosPositivos = ['Didática', 'Exemplos', 'Clareza', 'Organizada', 'Atenciosa', 'Material', 'Excelente'];
+        }
+    }" x-init="carregarDados()">
+        
+        <div class="flex flex-col md:flex-row justify-between items-start gap-4 mb-10">
+            <div>
+                <h1 class="text-4xl md:text-5xl font-extrabold text-slate-800">Análise de Evolução</h1>
+                <p class="text-lg text-slate-500 mt-2">Professor(a): <span class="font-bold" x-text="professor?.nome"></span></p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="font-semibold">Comparar:</span>
+                <select x-model="periodoAnterior" @change="carregarDados()" class="p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="2024.2">2024.2</option>
+                    <option value="2024.1">2024.1</option>
+                </select>
+                <span class="font-semibold">com</span>
+                <select x-model="periodoAtual" @change="carregarDados()" class="p-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="2025.1">2025.1</option>
+                    <option value="2024.2">2024.2</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 md:p-8 rounded-2xl shadow-xl mb-12">
+            <h2 class="text-2xl font-bold text-slate-800 mb-4">Evolução da Média Geral</h2>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="md:col-span-3 h-80 bg-slate-50 rounded-lg p-4 flex items-end">
+                    <svg class="w-full h-full" viewBox="0 0 400 200">
+                        <line x1="20" y1="180" x2="380" y2="180" stroke="#cbd5e1" stroke-width="2"/>
+                        <line x1="20" y1="20" x2="20" y2="180" stroke="#cbd5e1" stroke-width="2"/>
+                        <polyline points="50,100 150,80 250,50 350,40" fill="none" stroke="#3b82f6" stroke-width="3"/>
+                        <circle cx="50" cy="100" r="4" fill="#3b82f6"/>
+                        <circle cx="150" cy="80" r="4" fill="#3b82f6"/>
+                        <circle cx="250" cy="50" r="4" fill="#3b82f6"/>
+                        <circle cx="350" cy="40" r="4" fill="#3b82f6"/>
+                        <text x="50" y="195" text-anchor="middle" font-size="12">2024.1</text>
+                        <text x="150" y="195" text-anchor="middle" font-size="12">2024.2</text>
+                        <text x="250" y="195" text-anchor="middle" font-size="12">2025.1</text>
+                        <text x="350" y="195" text-anchor="middle" font-size="12">2025.2</text>
+                    </svg>
+                </div>
+                <div class="flex flex-col justify-center space-y-4">
+                    <div class="bg-slate-50 p-4 rounded-lg">
+                        <p class="text-sm text-slate-500">Média em <span x-text="periodoAnterior"></span></p>
+                        <p class="text-3xl font-bold" x-text="mediaAnterior"></p>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-lg">
+                        <p class="text-sm text-blue-700">Média em <span x-text="periodoAtual"></span></p>
+                        <p class="text-3xl font-bold text-blue-600" x-text="mediaAtual"></p>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded-lg">
+                        <p class="text-sm text-green-700">Variação</p>
+                        <p class="text-3xl font-bold text-green-600 flex items-center">
+                            <i :class="variacao >= 0 ? 'fas fa-arrow-up' : 'fas fa-arrow-down'" class="mr-2"></i>
+                            <span x-text="variacao + '%'"></span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <h2 class="text-3xl font-bold text-slate-800 mb-6">Evolução por Critério</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="bg-white p-6 rounded-2xl shadow-lg">
+                    <h3 class="font-bold text-lg mb-3">Didática e Clareza</h3>
+                    <div class="flex justify-between items-center">
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Anterior</p>
+                            <p class="font-bold text-2xl" x-text="criterios.didatica.anterior"></p>
+                        </div>
+                        <div class="text-center" :class="criterios.didatica.atual >= criterios.didatica.anterior ? 'text-green-600' : 'text-red-500'">
+                            <i class="fas fa-arrow-right-long text-2xl"></i>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Atual</p>
+                            <p class="font-bold text-2xl" :class="criterios.didatica.atual >= criterios.didatica.anterior ? 'text-green-600' : 'text-red-500'" x-text="criterios.didatica.atual"></p>
+                        </div>
+                        <svg class="w-24 h-12" viewBox="0 0 100 50">
+                            <polyline :points="criterios.didatica.atual >= criterios.didatica.anterior ? '0,40 25,30 50,20 75,15 100,5' : '0,10 25,15 50,25 75,30 100,40'" 
+                                     fill="none" 
+                                     :stroke="criterios.didatica.atual >= criterios.didatica.anterior ? '#22c55e' : '#ef4444'" 
+                                     stroke-width="3"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-lg">
+                    <h3 class="font-bold text-lg mb-3">Qualidade dos Materiais</h3>
+                    <div class="flex justify-between items-center">
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Anterior</p>
+                            <p class="font-bold text-2xl" x-text="criterios.materiais.anterior"></p>
+                        </div>
+                        <div class="text-center" :class="criterios.materiais.atual >= criterios.materiais.anterior ? 'text-green-600' : 'text-red-500'">
+                            <i class="fas fa-arrow-right-long text-2xl"></i>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Atual</p>
+                            <p class="font-bold text-2xl" :class="criterios.materiais.atual >= criterios.materiais.anterior ? 'text-green-600' : 'text-red-500'" x-text="criterios.materiais.atual"></p>
+                        </div>
+                        <svg class="w-24 h-12" viewBox="0 0 100 50">
+                            <polyline :points="criterios.materiais.atual >= criterios.materiais.anterior ? '0,40 25,30 50,20 75,15 100,5' : '0,10 25,15 50,25 75,30 100,40'" 
+                                     fill="none" 
+                                     :stroke="criterios.materiais.atual >= criterios.materiais.anterior ? '#22c55e' : '#ef4444'" 
+                                     stroke-width="3"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-lg">
+                    <h3 class="font-bold text-lg mb-3">Disponibilidade</h3>
+                    <div class="flex justify-between items-center">
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Anterior</p>
+                            <p class="font-bold text-2xl" x-text="criterios.disponibilidade.anterior"></p>
+                        </div>
+                        <div class="text-center" :class="criterios.disponibilidade.atual >= criterios.disponibilidade.anterior ? 'text-green-600' : 'text-red-500'">
+                            <i class="fas fa-arrow-right-long text-2xl"></i>
+                        </div>
+                        <div class="text-center">
+                            <p class="text-sm text-slate-500">Atual</p>
+                            <p class="font-bold text-2xl" :class="criterios.disponibilidade.atual >= criterios.disponibilidade.anterior ? 'text-green-600' : 'text-red-500'" x-text="criterios.disponibilidade.atual"></p>
+                        </div>
+                        <svg class="w-24 h-12" viewBox="0 0 100 50">
+                            <polyline :points="criterios.disponibilidade.atual >= criterios.disponibilidade.anterior ? '0,40 25,30 50,20 75,15 100,5' : '0,10 25,15 50,25 75,30 100,40'" 
+                                     fill="none" 
+                                     :stroke="criterios.disponibilidade.atual >= criterios.disponibilidade.anterior ? '#22c55e' : '#ef4444'" 
+                                     stroke-width="3"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-12">
+            <h2 class="text-3xl font-bold text-slate-800 mb-6">Análise de Sentimentos dos Comentários</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-white p-6 rounded-2xl shadow-lg">
+                    <h3 class="font-bold text-lg mb-4">Proporção de Comentários</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <p class="font-semibold mb-1">Período Anterior (<span x-text="periodoAnterior"></span>)</p>
+                            <div class="w-full bg-slate-200 rounded-full h-8 flex overflow-hidden">
+                                <div class="bg-green-500 h-8 flex items-center justify-center text-white font-bold" :style="`width: ${sentimentos.anterior.positivos}%`" x-text="sentimentos.anterior.positivos + '%'"></div>
+                                <div class="bg-red-500 h-8 flex items-center justify-center text-white font-bold" :style="`width: ${sentimentos.anterior.negativos}%`" x-text="sentimentos.anterior.negativos + '%'"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1">Período Atual (<span x-text="periodoAtual"></span>)</p>
+                            <div class="w-full bg-slate-200 rounded-full h-8 flex overflow-hidden">
+                                <div class="bg-green-500 h-8 flex items-center justify-center text-white font-bold" :style="`width: ${sentimentos.atual.positivos}%`" x-text="sentimentos.atual.positivos + '%'"></div>
+                                <div class="bg-red-500 h-8 flex items-center justify-center text-white font-bold" :style="`width: ${sentimentos.atual.negativos}%`" x-text="sentimentos.atual.negativos + '%'"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl shadow-lg">
+                    <h3 class="font-bold text-lg mb-4">Termos Mais Citados (Positivos)</h3>
+                    <div class="flex flex-wrap gap-x-4 gap-y-2 items-center">
+                        <template x-for="(termo, index) in termosPositivos" :key="index">
+                            <span :class="{
+                                'text-3xl font-bold text-blue-600': index === 0,
+                                'text-xl text-slate-700': index === 1,
+                                'text-2xl text-blue-500': index === 2,
+                                'text-lg text-slate-600': index === 3,
+                                'text-2xl font-semibold text-blue-600': index === 4,
+                                'text-xl text-slate-700': index === 5,
+                                'text-lg text-slate-600': index === 6
+                            }" x-text="termo"></span>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</body>
+</html> 
